@@ -7,14 +7,16 @@ import (
 	"github.com/sipeed/picoclaw/pkg"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
+
+	"github.com/kawai-network/y/paths"
 )
 
 const Logo = pkg.Logo
 
 // GetPicoclawHome returns the kawaiclaw home directory.
-// Priority: $KAWAICLAW_HOME > ~/.kawaiclaw
 func GetPicoclawHome() string {
-	return config.GetHome()
+	os.Setenv("PICOCLAW_HOME", paths.Base())
+	return paths.Base()
 }
 
 func GetConfigPath() string {
