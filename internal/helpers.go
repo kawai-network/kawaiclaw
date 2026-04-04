@@ -15,7 +15,9 @@ const Logo = pkg.Logo
 
 // GetPicoclawHome returns the kawaiclaw home directory.
 func GetPicoclawHome() string {
-	os.Setenv("PICOCLAW_HOME", paths.Base())
+	if home := os.Getenv(config.EnvHome); home != "" {
+		return home
+	}
 	return paths.Base()
 }
 

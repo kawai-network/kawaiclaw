@@ -18,7 +18,7 @@ var configPath = ""
 func initTest(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath = filepath.Join(tmpDir, "config.json")
-	_ = os.Setenv("KAWAICLAW_CONFIG", configPath)
+	t.Setenv(config.EnvConfig, configPath)
 }
 
 // captureStdout captures stdout during the execution of fn and returns the captured output

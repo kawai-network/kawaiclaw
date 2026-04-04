@@ -13,17 +13,15 @@ import (
 )
 
 func TestGetConfigPath(t *testing.T) {
-	t.Setenv("HOME", "/tmp/home")
-
+	// In development mode, paths.Base() returns "data"
 	got := GetConfigPath()
-	want := filepath.Join("/tmp/home", ".kawaiclaw", "config.json")
+	want := filepath.Join("data", "config.json")
 
 	assert.Equal(t, want, got)
 }
 
 func TestGetConfigPath_WithKAWAICLAW_HOME(t *testing.T) {
 	t.Setenv(config.EnvHome, "/custom/kawaiclaw")
-	t.Setenv("HOME", "/tmp/home")
 
 	got := GetConfigPath()
 	want := filepath.Join("/custom/kawaiclaw", "config.json")
@@ -32,7 +30,7 @@ func TestGetConfigPath_WithKAWAICLAW_HOME(t *testing.T) {
 }
 
 func TestGetConfigPath_WithKAWAICLAW_CONFIG(t *testing.T) {
-	t.Setenv("KAWAICLAW_CONFIG", "/custom/config.json")
+	t.Setenv(config.EnvConfig, "/custom/config.json")
 	t.Setenv(config.EnvHome, "/custom/kawaiclaw")
 	t.Setenv("HOME", "/tmp/home")
 

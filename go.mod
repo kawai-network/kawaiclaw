@@ -11,6 +11,8 @@ require (
 	golang.org/x/term v0.41.0
 )
 
+replace github.com/bwmarrin/discordgo => github.com/yeongaori/discordgo-fork v0.0.0-20260319072544-e8e546f5d532
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/SevereCloud/vksdk/v3 v3.3.1 // indirect
@@ -40,6 +42,7 @@ require (
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/caarlos0/env/v11 v11.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/creack/pty v1.1.24 // indirect
