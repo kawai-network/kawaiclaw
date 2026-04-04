@@ -1,153 +1,284 @@
-name: Create Tag and Release
+name: Release kawaiclaw
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag (required, e.g. v0.2.0)"
+      version:
+        description: 'Version to release (e.g., 0.2.8)'
         required: true
         type: string
-      prerelease:
-        description: "Mark as pre-release"
+      build_run_id:
+        description: 'Optional build run ID (defaults to latest successful push build on main)'
         required: false
-        type: boolean
-        default: false
-      draft:
-        description: "Create as draft"
-        required: false
-        type: boolean
-        default: false
-      upload_tos:
-        description: "Upload to Volcengine TOS"
-        required: false
-        type: boolean
-        default: false
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+  packages: write
 
 env:
-  GHCR_REGISTRY: ghcr.io
-  GHCR_IMAGE_NAME: ${{ github.repository_owner }}/kawaiclaw
-  DOCKERHUB_REGISTRY: docker.io
-  DOCKERHUB_IMAGE_NAME: ${{ vars.DOCKERHUB_REPOSITORY }}
+  GO_VERSION: '1.26'
+  R2_BUCKET: 'kawai'
+  R2_PUBLIC_URL: 'https://storage.getkawai.com'
+  GOPRIVATE: 'github.com/kawai-network/*'
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  GH_TOKEN_VALUE: ${{ secrets.GH_TOKEN }}
+  R2_ACCOUNT_ID_VALUE: ${{ secrets.R2_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID_VALUE: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY_VALUE: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  GO_BUILD_TAGS: 'goolm,stdjson'
+  VERSION_PKG: 'github.com/sipeed/picoclaw/pkg/config'
 
 jobs:
-  create-tag:
-    name: Create Git Tag
+  build-linux:
+    if: github.event_name != 'workflow_dispatch'
+    name: Build Linux
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          fetch-depth: 0
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Validate release tag
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
+      - name: Configure Git for private modules
+        if: ${{ env.GH_TOKEN_VALUE != '' }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid RELEASE_TAG: $RELEASE_TAG (expected semver like v1.2.3 or v1.2.3-rc.1)" >&2
-            exit 1
-          fi
-          if git tag --list "$RELEASE_TAG" | grep -q .; then
-            echo "Tag already exists locally: $RELEASE_TAG" >&2
-            exit 1
-          fi
-          if git ls-remote --tags origin "$RELEASE_TAG" | grep -q .; then
-            echo "Tag already exists on origin: $RELEASE_TAG" >&2
-            exit 1
-          fi
+          git config --global url."https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
-      - name: Create and push tag
-        shell: bash
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build Linux AMD64
         env:
-          RELEASE_TAG: ${{ inputs.tag }}
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 0
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
-          git push origin "$RELEASE_TAG"
+          BUILD_REF="${GITHUB_SHA::7}"
+          mkdir -p bin
+          go build -tags ${{ env.GO_BUILD_TAGS }} \
+            -ldflags "-s -w -X ${{ env.VERSION_PKG }}.Version=build-${BUILD_REF}" \
+            -o bin/kawaiclaw .
+
+      - name: Create distribution archive
+        run: |
+          BUILD_REF="${GITHUB_SHA::7}"
+          cd bin
+          tar -czf "kawaiclaw-build-${BUILD_REF}-linux-amd64.tar.gz" kawaiclaw
+          sha256sum "kawaiclaw-build-${BUILD_REF}-linux-amd64.tar.gz" > "checksums-linux-amd64.txt"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build-amd64
+          retention-days: 30
+          path: |
+            bin/kawaiclaw-build-*.tar.gz
+            bin/checksums-linux-*.txt
+
+  build-macos:
+    if: github.event_name != 'workflow_dispatch'
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Configure Git for private modules
+        if: ${{ env.GH_TOKEN_VALUE != '' }}
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build macOS ARM64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: 0
+        run: |
+          BUILD_REF="${GITHUB_SHA::7}"
+          mkdir -p bin
+          go build -tags ${{ env.GO_BUILD_TAGS }} \
+            -ldflags "-s -w -X ${{ env.VERSION_PKG }}.Version=build-${BUILD_REF}" \
+            -o bin/kawaiclaw .
+
+      - name: Create distribution archive
+        run: |
+          BUILD_REF="${GITHUB_SHA::7}"
+          cd bin
+          tar -czf "kawaiclaw-build-${BUILD_REF}-darwin-arm64.tar.gz" kawaiclaw
+          shasum -a 256 "kawaiclaw-build-${BUILD_REF}-darwin-arm64.tar.gz" > "checksums-darwin-arm64.txt"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: darwin-build-arm64
+          retention-days: 30
+          path: |
+            bin/kawaiclaw-build-*.tar.gz
+            bin/checksums-darwin-*.txt
+
+  build-windows:
+    if: github.event_name != 'workflow_dispatch'
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Configure Git for private modules
+        if: ${{ env.GH_TOKEN_VALUE != '' }}
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build Windows AMD64
+        shell: powershell
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          $BUILD_REF = "${{ github.sha }}".Substring(0,7)
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          go build -tags "${{ env.GO_BUILD_TAGS }}" -ldflags "-s -w -X ${{ env.VERSION_PKG }}.Version=build-$BUILD_REF" -o bin/kawaiclaw.exe .
+
+      - name: Create distribution archive
+        run: |
+          cd bin
+          $BUILD_REF = "${{ github.sha }}".Substring(0,7)
+          $ARCHIVE = "kawaiclaw-build-${BUILD_REF}-windows-amd64.zip"
+          Compress-Archive -Path kawaiclaw.exe -DestinationPath $ARCHIVE
+          Get-FileHash -Algorithm SHA256 $ARCHIVE | ForEach-Object { "$($_.Hash.ToLower())  $((Split-Path -Leaf $_.Path))" } | Out-File -Encoding ASCII checksums-windows-amd64.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          retention-days: 30
+          path: |
+            bin/kawaiclaw-build-*.zip
+            bin/checksums-windows-amd64.txt
+
 
   release:
-    name: GoReleaser Release
-    needs: create-tag
+    if: github.event_name == 'workflow_dispatch'
+    name: Release From Latest Build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
     steps:
-      - name: Checkout tag
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.tag }}
-
-      - name: Setup Go from go.mod
-        id: setup-go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        run: corepack enable && corepack prepare pnpm@latest --activate
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GH_TOKEN }}
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: ~> v2
-          args: release --clean
+      - name: Resolve build run ID
+        id: resolve_run
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          DOCKERHUB_IMAGE_NAME: ${{ vars.DOCKERHUB_REPOSITORY }}
-          GOVERSION: ${{ steps.setup-go.outputs.go-version }}
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-
-      - name: Apply release flags
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          INPUT_RUN_ID: ${{ inputs.build_run_id }}
         run: |
-          gh release edit "${{ inputs.tag }}" \
-            --draft=${{ inputs.draft }} \
-            --prerelease=${{ inputs.prerelease }}
+          if [ -n "$INPUT_RUN_ID" ]; then
+            echo "run_id=$INPUT_RUN_ID" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-  upload-tos:
-    name: Upload to TOS
-    needs: release
-    if: ${{ inputs.upload_tos }}
-    uses: ./.github/workflows/upload-tos.yml
-    with:
-      tag: ${{ inputs.tag }}
-    secrets: inherit
+          RUN_ID=$(gh api "repos/${{ github.repository }}/actions/workflows/release.yml/runs" \
+            --jq '.workflow_runs | map(select(.event=="push" and .head_branch=="main" and .conclusion=="success")) | first | .id')
+
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "No successful push build found on main"
+            exit 1
+          fi
+
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download Linux build artifacts
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          run_id: ${{ steps.resolve_run.outputs.run_id }}
+          name: linux-build-amd64
+          path: artifacts/linux
+
+      - name: Download macOS build artifacts
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          run_id: ${{ steps.resolve_run.outputs.run_id }}
+          name: darwin-build-arm64
+          path: artifacts/darwin
+
+      - name: Download Windows build artifacts
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GH_TOKEN }}
+          run_id: ${{ steps.resolve_run.outputs.run_id }}
+          name: windows-build
+          path: artifacts/windows
+
+      - name: Prepare release assets
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          cp artifacts/linux/kawaiclaw-build-*-linux-amd64.tar.gz "release-assets/kawaiclaw-${VERSION}-linux-amd64.tar.gz"
+          cp artifacts/darwin/kawaiclaw-build-*-darwin-arm64.tar.gz "release-assets/kawaiclaw-${VERSION}-darwin-arm64.tar.gz"
+          cp artifacts/windows/kawaiclaw-build-*-windows-amd64.zip "release-assets/kawaiclaw-${VERSION}-windows-amd64.zip"
+
+          (
+            cd release-assets
+            sha256sum kawaiclaw-${VERSION}-* > checksums.txt
+          )
+
+      - name: Create draft release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: kawaiclaw v${{ inputs.version }}
+          draft: true
+          prerelease: false
+          body: |
+            ## kawaiclaw v${{ inputs.version }}
+
+            Release dibuat dari latest successful build pada branch `main` tanpa rebuild.
+
+            ### Downloads
+            - Linux AMD64: `kawaiclaw-${{ inputs.version }}-linux-amd64.tar.gz`
+            - macOS ARM64: `kawaiclaw-${{ inputs.version }}-darwin-arm64.tar.gz`
+            - Windows AMD64: `kawaiclaw-${{ inputs.version }}-windows-amd64.zip`
+            - Checksums: `checksums.txt`
+          files: |
+            release-assets/kawaiclaw-${{ inputs.version }}-linux-amd64.tar.gz
+            release-assets/kawaiclaw-${{ inputs.version }}-darwin-arm64.tar.gz
+            release-assets/kawaiclaw-${{ inputs.version }}-windows-amd64.zip
+            release-assets/checksums.txt
+
+      - name: Upload release assets to Cloudflare R2
+        if: ${{ env.R2_ACCOUNT_ID_VALUE != '' }}
+        uses: yudaprama/r2-upload-action@master
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ env.R2_BUCKET }}
+          source-dir: release-assets
+          destination-dir: ${{ inputs.version }}/kawaiclaw
+          output-file-url: true
